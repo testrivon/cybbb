@@ -1,7 +1,10 @@
 import os
 
+# Change this if your Northflank mount point is different
+VOLUME_MOUNT_PATH = "/data"
+
 def get_volume_path(filename: str) -> str:
-    # Replit has no special volume dir, so store in local `data` folder
-    data_dir = os.path.join(os.getcwd(), "data")
-    os.makedirs(data_dir, exist_ok=True)
-    return os.path.join(data_dir, filename)
+    """Get the full path to a file in the mounted volume."""
+    path = os.path.join(VOLUME_MOUNT_PATH, filename)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    return path
