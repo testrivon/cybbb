@@ -425,31 +425,7 @@ async def alllastfm(ctx):
     if not data:
         await ctx.send("No users have registered a Last.fm username.")
         return
-
-    guild_members = ctx.guild.members
-    matching_users = []
-
-    for user_id, lastfm_username in data.items():
-        member = ctx.guild.get_member(int(user_id))
-        if member:
-            matching_users.append((member.display_name, lastfm_username))
-
-    if not matching_users:
-        await ctx.send("No registered users found in this server.")
-        return
-
-    embed = discord.Embed(
-        title=f"Registered Last.fm Users in {ctx.guild.name}",
-        color=discord.Color.purple()
-    )
-    embed.set_footer(text=f"Total: {len(matching_users)} users")
-
-    for name, username in matching_users:
-        embed.add_field(name=name, value=username, inline=False)
-
-    await ctx.send(embed=embed)
-
-
+        
 @bot.command()
 async def lyr(ctx, *, query: str = None):
     data = load_user_data()
@@ -489,15 +465,15 @@ async def lyr(ctx, *, query: str = None):
             await ctx.send("⚠️ Couldn't fetch your currently playing track.")
             return
 
-    # Normalize and clean song/artist
-    artist = artist.strip().title()
-    song = song.strip().title()
+    # Normalize and clean song/artist (do not use .title())
+    artist = artist.strip()
+    song = song.strip()
 
     # Remove " (Live)", "- Live", "[Live]" from song titles
     live_variants = [" (Live)", "- Live", "[Live]"]
     for variant in live_variants:
         if variant.lower() in song.lower():
-            song = song.lower().replace(variant.lower(), '').strip().title()
+            song = song.lower().replace(variant.lower(), '').strip()
 
     api_url = f"https://api.lyrics.ovh/v1/{urllib.parse.quote(artist)}/{urllib.parse.quote(song)}"
 
@@ -531,6 +507,31 @@ async def lyr(ctx, *, query: str = None):
 
     view = LyricsPaginator(pages, f"🎶 Lyrics: {song} by {artist}")
     await ctx.send(embed=embed, view=view)
+    guild_members = ctx.guild.members
+    matching_users = []
+
+    for user_id, lastfm_username in data.items():
+        member = ctx.guild.get_member(int(user_id))
+        if member:
+            matching_users.append((member.display_name, lastfm_username))
+
+    if not matching_users:
+        await ctx.send("No registered users found in this server.")
+        return
+
+    embed = discord.Embed(
+        title=f"Registered Last.fm Users in {ctx.guild.name}",
+        color=discord.Color.purple()
+    )
+    embed.set_footer(text=f"Total: {len(matching_users)} users")
+
+    for name, username in matching_users:
+        embed.add_field(name=name, value=username, inline=False)
+
+    await ctx.send(embed=embed)
+
+
+
 
 
 @bot.command()
