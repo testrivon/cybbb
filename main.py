@@ -426,19 +426,23 @@ async def alllastfm(ctx):
         await ctx.send("No users have registered a Last.fm username.")
         return
         
+
 @bot.command()
 async def lyr(ctx, *, query: str = None):
     data = load_user_data()
     api_key = os.getenv('LASTFM_API_KEY')
 
+    # Handle input
     if query:
         if '-' in query:
             artist, song = [x.strip() for x in query.split('-', 1)]
             cover_url = None
+            source = "manual"
         else:
             await ctx.send("❌ Please provide the song in Artist - Song format (e.g., !lyr Daft Punk - Around the World).")
             return
     else:
+        # Last.fm fallback if no query
         user_id = str(ctx.author.id)
         if user_id not in data:
             await ctx.send("❌ You haven't set your Last.fm username yet. Use !setlastfm <your_username>.")
@@ -458,78 +462,56 @@ async def lyr(ctx, *, query: str = None):
             track = api_data['recenttracks']['track'][0]
             artist = track['artist']['#text']
             song = track['name']
-
             images = track.get('image', [])
             cover_url = next((img['#text'] for img in reversed(images) if img['#text']), None)
+            source = f"Last.fm user: {username}"
         except (KeyError, IndexError):
             await ctx.send("⚠️ Couldn't fetch your currently playing track.")
             return
 
-    # Normalize and clean song/artist (do not use .title())
+    # Clean artist and song without changing case
     artist = artist.strip()
     song = song.strip()
 
-    # Remove " (Live)", "- Live", "[Live]" from song titles
+    # Remove live suffixes (case insensitive)
     live_variants = [" (Live)", "- Live", "[Live]"]
     for variant in live_variants:
-        if variant.lower() in song.lower():
-            song = song.lower().replace(variant.lower(), '').strip()
+        song = song.replace(variant, "", 1).strip()
 
+    # Query lyrics.ovh
     api_url = f"https://api.lyrics.ovh/v1/{urllib.parse.quote(artist)}/{urllib.parse.quote(song)}"
 
     async with aiohttp.ClientSession() as session:
         async with session.get(api_url) as response:
             if response.status != 200:
-                await ctx.send(f"❌ Couldn't fetch lyrics for `{artist} - {song}`. Please check the name or try using `!lyr Artist - Song` format.")
+                await ctx.send(f"❌ Couldn't fetch lyrics for `{artist} - {song}`. Please double-check the names or use `!lyr Artist - Song`.")
                 return
             lyrics_data = await response.json()
             lyrics = lyrics_data.get('lyrics')
 
     if not lyrics:
-        await ctx.send("❌ No lyrics found.")
+        await ctx.send(f"❌ No lyrics found for `{song}` by `{artist}`.")
         return
 
-    # Clean and paginate lyrics
-    cleaned_lyrics = "\n\n".join(paragraph.strip() for paragraph in lyrics.split('\n\n'))
-    cleaned_lyrics = "\n".join(line.strip() for line in cleaned_lyrics.splitlines() if line.strip())
-
+    # Clean lyrics
+    cleaned_lyrics = "\n".join(line.strip() for line in lyrics.splitlines() if line.strip())
     max_length = 2000
     pages = [cleaned_lyrics[i:i + max_length] for i in range(0, len(cleaned_lyrics), max_length)]
 
+    # Create embed
     embed = discord.Embed(
-        title=f"🎶 Lyrics: {song} by {artist} (Page 1/{len(pages)})",
+        title=f"🎶 Lyrics: {song}",
         description=pages[0],
         color=discord.Color.green()
     )
+    embed.set_author(name=f"By {artist}")
+    embed.set_footer(text=f"{source} • Page 1/{len(pages)}")
 
     if cover_url:
         embed.set_thumbnail(url=cover_url)
 
     view = LyricsPaginator(pages, f"🎶 Lyrics: {song} by {artist}")
     await ctx.send(embed=embed, view=view)
-    guild_members = ctx.guild.members
-    matching_users = []
-
-    for user_id, lastfm_username in data.items():
-        member = ctx.guild.get_member(int(user_id))
-        if member:
-            matching_users.append((member.display_name, lastfm_username))
-
-    if not matching_users:
-        await ctx.send("No registered users found in this server.")
-        return
-
-    embed = discord.Embed(
-        title=f"Registered Last.fm Users in {ctx.guild.name}",
-        color=discord.Color.purple()
-    )
-    embed.set_footer(text=f"Total: {len(matching_users)} users")
-
-    for name, username in matching_users:
-        embed.add_field(name=name, value=username, inline=False)
-
-    await ctx.send(embed=embed)
-
 
 
 
