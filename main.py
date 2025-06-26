@@ -1819,11 +1819,6 @@ async def cyb(ctx):
         value="Get lyrics for the song you're (or someone else is) listening to on Last.fm if possible.",
         inline=False
     )
-    embed1.add_field(
-        name="!alllastfm",
-        value="List all server members who have registered a Last.fm username.",
-        inline=False
-    )
 
     embed2 = discord.Embed(
         title="Last Letter Section",
@@ -1883,31 +1878,6 @@ async def cyb(ctx):
     embed2.add_field(
         name="!glbu [7d/30d/90d/all]",
         value="Global User Leaderboard.",
-        inline=False
-    )
-    embed2.add_field(
-        name="!def <word>",
-        value="Get a dictionary definition for the word.",
-        inline=False
-    )
-    embed2.add_field(
-        name="!lastletter",
-        value="Show the current status of the Last Letter game.",
-        inline=False
-    )
-    embed2.add_field(
-        name="!startlastletter",
-        value="Start the Last Letter game.",
-        inline=False
-    )
-    embed2.add_field(
-        name="!changelength",
-        value="Change the length if you want",
-        inline=False
-    )
-    embed2.add_field(
-        name="!endlastletter",
-        value="End the Last Letter game and show final stats",
         inline=False
     )
 
