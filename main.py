@@ -439,12 +439,12 @@ async def lyr(ctx, *, query: str = None):
             await ctx.send("❌ Use format: `!lyr Artist - Song`.")
             return
         artist, song = [x.strip() for x in query.split('-', 1)]
-        cover_url = None
         source = "manual"
+        cover_url = None
     else:
         user_id = str(ctx.author.id)
         if user_id not in data:
-            await ctx.send("❌ You haven't set your Last.fm username. Use `!setlastfm <username>`.")
+            await ctx.send("❌ Use `!setlastfm` to link your Last.fm account.")
             return
 
         username = data[user_id]
@@ -453,7 +453,7 @@ async def lyr(ctx, *, query: str = None):
         async with aiohttp.ClientSession() as session:
             async with session.get(url) as response:
                 if response.status != 200:
-                    await ctx.send("❌ Couldn't fetch your recent track from Last.fm.")
+                    await ctx.send("❌ Couldn't fetch recent track.")
                     return
                 api_data = await response.json()
 
@@ -465,33 +465,32 @@ async def lyr(ctx, *, query: str = None):
             cover_url = next((img['#text'] for img in reversed(images) if img['#text']), None)
             source = f"Last.fm user: {username}"
         except Exception:
-            await ctx.send("⚠️ Couldn't parse Last.fm data.")
+            await ctx.send("⚠️ Couldn't parse track info.")
             return
 
-    # Build Genius URL
-    genius_slug = f"{artist.strip()} {song.strip()}".lower()
-    genius_slug = re.sub(r"[^\w\s-]", "", genius_slug).replace(" ", "-")
-    genius_url = f"https://genius.com/{genius_slug}-lyrics"
+    artist_fmt = artist.strip().replace(" ", "_").replace(":", "").title()
+    song_fmt = song.strip().replace(" ", "_").replace(":", "").title()
+    fandom_url = f"https://lyrics.fandom.com/wiki/{artist_fmt}:{song_fmt}"
 
-    # Scrape Genius page
     async with aiohttp.ClientSession() as session:
-        async with session.get(genius_url) as response:
+        async with session.get(fandom_url) as response:
             if response.status != 200:
-                await ctx.send(f"❌ Genius page not found for `{artist} - {song}`.")
+                await ctx.send(f"❌ Lyrics not found at `{fandom_url}`.")
                 return
             html = await response.text()
 
-    # Extract lyrics
-    raw_lyrics = re.findall(r'<div data-lyrics-container="true">(.*?)</div>', html, re.DOTALL)
-    if not raw_lyrics:
-        await ctx.send(f"❌ Couldn't extract lyrics from Genius for `{song}`.")
+    # Extract lyrics between <div class='lyricbox'> ... </div>
+    match = re.search(r"<div class='lyricbox'>(.*?)</div>", html, re.DOTALL)
+    if not match:
+        await ctx.send("❌ Couldn't extract lyrics from Fandom.")
         return
 
-    lyrics = "\n".join(re.sub(r"<.*?>", "", block).strip() for block in raw_lyrics)
-    lyrics = re.sub(r"\n{3,}", "\n\n", lyrics).strip()
+    raw_html = match.group(1)
+    lyrics = re.sub(r"<br\s*/?>", "\n", raw_html)
+    lyrics = re.sub(r"<.*?>", "", lyrics).strip()
 
     if not lyrics or len(lyrics) < 20:
-        await ctx.send(f"❌ No usable lyrics found for `{song}`.")
+        await ctx.send("❌ No usable lyrics found.")
         return
 
     pages = [lyrics[i:i+2000] for i in range(0, len(lyrics), 2000)]
