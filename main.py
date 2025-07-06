@@ -432,29 +432,26 @@ async def lyr(ctx, *, query: str = None):
     data = load_user_data()
     api_key = os.getenv('LASTFM_API_KEY')
 
-    # Handle input
     if query:
         if '-' in query:
             artist, song = [x.strip() for x in query.split('-', 1)]
             cover_url = None
             source = "manual"
         else:
-            await ctx.send("❌ Please provide the song in Artist - Song format (e.g., !lyr Daft Punk - Around the World).")
+            await ctx.send("❌ Please use format: `!lyr Artist - Song`.")
             return
     else:
-        # Last.fm fallback if no query
         user_id = str(ctx.author.id)
         if user_id not in data:
-            await ctx.send("❌ You haven't set your Last.fm username yet. Use !setlastfm <your_username>.")
+            await ctx.send("❌ You haven't set your Last.fm username. Use `!setlastfm <your_username>`.")
             return
 
         username = data[user_id]
         url = f"http://ws.audioscrobbler.com/2.0/?method=user.getrecenttracks&user={username}&api_key={api_key}&format=json&limit=1"
-
         async with aiohttp.ClientSession() as session:
             async with session.get(url) as response:
                 if response.status != 200:
-                    await ctx.send("❌ Failed to fetch your recent track from Last.fm.")
+                    await ctx.send("❌ Couldn't fetch your recent track from Last.fm.")
                     return
                 api_data = await response.json()
 
@@ -464,41 +461,41 @@ async def lyr(ctx, *, query: str = None):
             song = track['name']
             images = track.get('image', [])
             cover_url = next((img['#text'] for img in reversed(images) if img['#text']), None)
-            source = f"Last.fm user: {username}"
-        except (KeyError, IndexError):
-            await ctx.send("⚠️ Couldn't fetch your currently playing track.")
+            source = f"Last.fm: {username}"
+        except Exception:
+            await ctx.send("⚠️ Couldn't parse your recent track. Try again later.")
             return
 
-    # Clean artist and song without changing case
+    # Clean up song/artist
     artist = artist.strip()
     song = song.strip()
-
-    # Remove live suffixes (case insensitive)
-    live_variants = [" (Live)", "- Live", "[Live]"]
-    for variant in live_variants:
-        song = song.replace(variant, "", 1).strip()
+    for variant in [" (Live)", "- Live", "[Live]"]:
+        song = song.replace(variant, "").strip()
 
     # Query lyrics.ovh
-    api_url = f"https://api.lyrics.ovh/v1/{urllib.parse.quote(artist)}/{urllib.parse.quote(song)}"
+    encoded_artist = urllib.parse.quote(artist)
+    encoded_song = urllib.parse.quote(song)
+    api_url = f"https://api.lyrics.ovh/v1/{encoded_artist}/{encoded_song}"
 
     async with aiohttp.ClientSession() as session:
         async with session.get(api_url) as response:
             if response.status != 200:
-                await ctx.send(f"❌ Couldn't fetch lyrics for `{artist} - {song}`. Please double-check the names or use `!lyr Artist - Song`.")
+                await ctx.send(f"❌ Couldn't find lyrics for `{artist} - {song}`.")
                 return
-            lyrics_data = await response.json()
-            lyrics = lyrics_data.get('lyrics')
+            try:
+                data = await response.json()
+                lyrics = data.get("lyrics")
+            except Exception:
+                await ctx.send("❌ Failed to parse lyrics response.")
+                return
 
     if not lyrics:
         await ctx.send(f"❌ No lyrics found for `{song}` by `{artist}`.")
         return
 
-    # Clean lyrics
-    cleaned_lyrics = "\n".join(line.strip() for line in lyrics.splitlines() if line.strip())
-    max_length = 2000
-    pages = [cleaned_lyrics[i:i + max_length] for i in range(0, len(cleaned_lyrics), max_length)]
+    cleaned = "\n".join(line.strip() for line in lyrics.splitlines() if line.strip())
+    pages = [cleaned[i:i+2000] for i in range(0, len(cleaned), 2000)]
 
-    # Create embed
     embed = discord.Embed(
         title=f"🎶 Lyrics: {song}",
         description=pages[0],
@@ -506,13 +503,11 @@ async def lyr(ctx, *, query: str = None):
     )
     embed.set_author(name=f"By {artist}")
     embed.set_footer(text=f"{source} • Page 1/{len(pages)}")
-
     if cover_url:
         embed.set_thumbnail(url=cover_url)
 
     view = LyricsPaginator(pages, f"🎶 Lyrics: {song} by {artist}")
     await ctx.send(embed=embed, view=view)
-
 
 
 
