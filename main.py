@@ -19,8 +19,7 @@ from discord.ui import View, Button, Select
 from discord import SelectOption
 from typing import List, Dict, Union
 from volume_helper import get_volume_path
-import re
-import urllib.parse
+import re, urllib.parse
 
 
 def is_admin_or_developer(ctx):
@@ -432,68 +431,70 @@ async def alllastfm(ctx):
 
 
 
+
 @bot.command()
 async def lyr(ctx, *, query: str = None):
     data = load_user_data()
 
     if query:
         if '-' not in query:
-            await ctx.send("❌ Use format: `!lyr Artist - Song`.")
-            return
-        artist, song = [x.strip() for x in query.split('-',1)]
+            return await ctx.send("❌ Use format: `!lyr Artist - Song`.")
+        artist, song = [x.strip() for x in query.split('-', 1)]
         source = "manual"
         cover_url = None
     else:
         user_id = str(ctx.author.id)
         if user_id not in data:
-            await ctx.send("❌ Use `!setlastfm` first.")
-            return
+            return await ctx.send("❌ Set Last.fm username first with `!setlastfm`.")
         username = data[user_id]
         api_key = os.getenv("LASTFM_API_KEY")
         url = f"http://ws.audioscrobbler.com/2.0/?method=user.getrecenttracks&user={username}&api_key={api_key}&format=json&limit=1"
         async with aiohttp.ClientSession() as s:
-            async with s.get(url) as r:
-                if r.status != 200: return await ctx.send("❌ Could not fetch track.")
-                track = (await r.json())["recenttracks"]["track"][0]
+            r = await s.get(url)
+            if r.status != 200:
+                return await ctx.send("❌ Couldn't fetch your Last.fm track.")
+            track = (await r.json())["recenttracks"]["track"][0]
         artist, song = track["artist"]["#text"], track["name"]
         images = track.get("image", [])
         cover_url = next((img["#text"] for img in reversed(images) if img["#text"]), None)
         source = f"Last.fm user: {username}"
 
-    # Step 1: Search AZLyrics
     query_str = urllib.parse.quote_plus(f"{artist} {song}")
-    search_url = f"http://search.azlyrics.com/search.php?q={query_str}"
-    async with aiohttp.ClientSession(headers={"User-Agent":"Mozilla/5.0"}) as s:
-        async with s.get(search_url) as r:
-            if r.status != 200: return await ctx.send("❌ AZLyrics search failed.")
-            text = await r.text()
+    search_url = f"https://www.musixmatch.com/search/{query_str}/tracks"
+    headers = {"User-Agent": "Mozilla/5.0"}
 
-    m = re.search(r'<td class="text-left visitedlyr">.*?<a href="(http://www.azlyrics.com/lyrics/.*?)".*?</td>', text, re.DOTALL)
-    if not m: return await ctx.send(f"❌ No AZLyrics result for **{artist} - {song}**")
-    song_url = m.group(1)
+    async with aiohttp.ClientSession(headers=headers) as s:
+        r = await s.get(search_url)
+        if r.status != 200:
+            return await ctx.send("❌ Musixmatch search failed.")
+        html = await r.text()
 
-    # Step 2: Fetch lyrics page
-    async with aiohttp.ClientSession(headers={"User-Agent":"Mozilla/5.0"}) as s:
-        async with s.get(song_url) as r:
-            if r.status != 200: return await ctx.send("❌ Failed to fetch lyrics page.")
-            html = await r.text()
+    m = re.search(r'/lyrics/[^"]+', html)
+    if not m:
+        return await ctx.send(f"❌ No Musixmatch lyrics found for {artist} - {song}")
+    lyrics_url = "https://www.musixmatch.com" + m.group(0)
 
-    # Step 3: Extract lyrics
-    lyrics_match = re.search(r'<!-- start of lyrics -->(.*?)<!-- end of lyrics -->', html, re.DOTALL)
-    if not lyrics_match: return await ctx.send("❌ Couldn't extract lyrics from AZLyrics.")
-    lyrics = lyrics_match.group(1).strip()
-    lyrics = re.sub(r'<br\s*/?>', '\n', lyrics)
-    lyrics = re.sub(r'<.*?>', '', lyrics).strip()
-    if len(lyrics) < 20: return await ctx.send("❌ Lyrics text too short, likely failed.")
+    async with aiohttp.ClientSession(headers=headers) as s:
+        r = await s.get(lyrics_url)
+        if r.status != 200:
+            return await ctx.send("❌ Failed to load Musixmatch lyrics page.")
+        html = await r.text()
+
+    blocks = re.findall(r'"lyrics_body":"([^"]+)"', html)
+    if not blocks:
+        return await ctx.send("❌ Couldn't extract lyrics.")
+    lyrics = blocks[0].replace('\\n', '\n').replace('\\u0027', "'")
+    lyrics = re.sub(r'\.\.\.$', '', lyrics).strip()
+
+    if len(lyrics) < 20:
+        return await ctx.send("❌ Lyrics too short, likely failed.")
 
     pages = [lyrics[i:i+2000] for i in range(0, len(lyrics), 2000)]
-
-    embed = discord.Embed(
-        title=f"🎶 Lyrics: {song}", description=pages[0], color=discord.Color.green()
-    )
+    embed = discord.Embed(title=f"🎶 Lyrics: {song}", description=pages[0], color=discord.Color.green())
     embed.set_author(name=f"By {artist}")
     embed.set_footer(text=f"{source} • Page 1/{len(pages)}")
-    if cover_url: embed.set_thumbnail(url=cover_url)
+    if cover_url:
+        embed.set_thumbnail(url=cover_url)
 
     view = LyricsPaginator(pages, f"Lyrics: {song} by {artist}")
     await ctx.send(embed=embed, view=view)
