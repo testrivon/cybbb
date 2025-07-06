@@ -430,12 +430,15 @@ async def alllastfm(ctx):
 @bot.command()
 async def lyr(ctx, *, query: str = None):
     data = load_user_data()
-    ksoft_key = os.getenv("KSOFT_API_KEY")
-    if not ksoft_key:
-        await ctx.send("❌ KSoft API key not configured.")
-        return
 
-    if not query:
+    if query:
+        if '-' not in query:
+            await ctx.send("❌ Use format: `!lyr Artist - Song`.")
+            return
+        artist, song = [x.strip() for x in query.split('-', 1)]
+        cover_url = None
+        source = "manual"
+    else:
         user_id = str(ctx.author.id)
         if user_id not in data:
             await ctx.send("❌ Use `!setlastfm` to link your Last.fm account.")
@@ -444,10 +447,11 @@ async def lyr(ctx, *, query: str = None):
         username = data[user_id]
         api_key = os.getenv('LASTFM_API_KEY')
         url = f"http://ws.audioscrobbler.com/2.0/?method=user.getrecenttracks&user={username}&api_key={api_key}&format=json&limit=1"
+
         async with aiohttp.ClientSession() as session:
             async with session.get(url) as response:
                 if response.status != 200:
-                    await ctx.send("⚠️ Failed to fetch your track from Last.fm.")
+                    await ctx.send("⚠️ Couldn't fetch your Last.fm track.")
                     return
                 api_data = await response.json()
 
@@ -455,50 +459,53 @@ async def lyr(ctx, *, query: str = None):
             track = api_data['recenttracks']['track'][0]
             artist = track['artist']['#text']
             song = track['name']
+            images = track.get('image', [])
+            cover_url = next((img['#text'] for img in reversed(images) if img['#text']), None)
+            source = f"Last.fm user: {username}"
         except Exception:
             await ctx.send("⚠️ Couldn't parse Last.fm data.")
             return
-    else:
-        if '-' not in query:
-            await ctx.send("❌ Use format: `!lyr Artist - Song`.")
-            return
-        artist, song = [x.strip() for x in query.split('-', 1)]
 
-    search_query = f"{artist} {song}"
+    artist_clean = artist.replace(" ", "-")
+    song_clean = song.replace(" ", "-")
+    genius_url = f"https://genius.com/{artist_clean}-{song_clean}-lyrics"
+
     async with aiohttp.ClientSession() as session:
-        headers = {"Authorization": f"Bearer {ksoft_key}"}
-        params = {"q": search_query}
-        async with session.get("https://api.ksoft.si/lyrics/search", headers=headers, params=params) as resp:
-            if resp.status != 200:
-                await ctx.send("❌ Couldn't retrieve lyrics.")
+        async with session.get(genius_url) as response:
+            if response.status != 200:
+                await ctx.send(f"❌ Couldn't fetch lyrics from Genius for `{artist} - {song}`.")
                 return
-            data = await resp.json()
+            html = await response.text()
 
-    if not data.get("data"):
-        await ctx.send("❌ No lyrics found for that song.")
+    import re
+    # Extract <div data-lyrics-container="true"> ... </div> sections
+    raw_lyrics = re.findall(r'<div data-lyrics-container="true">(.*?)</div>', html, re.DOTALL)
+    if not raw_lyrics:
+        await ctx.send(f"❌ Couldn't parse lyrics from Genius for `{song}` by `{artist}`.")
         return
 
-    song_data = data["data"][0]
-    lyrics = song_data.get("lyrics")
-    title = song_data.get("name")
-    artist_name = song_data.get("artist")
+    # Remove HTML tags
+    lyrics = "\n".join(re.sub(r'<.*?>', '', block).strip() for block in raw_lyrics)
+    lyrics = re.sub(r'\n{3,}', '\n\n', lyrics).strip()
 
-    if not lyrics:
-        await ctx.send("❌ Empty lyrics returned.")
+    if not lyrics or len(lyrics) < 10:
+        await ctx.send(f"❌ No usable lyrics found for `{song}` by `{artist}`.")
         return
 
     pages = [lyrics[i:i+2000] for i in range(0, len(lyrics), 2000)]
+
     embed = discord.Embed(
-        title=f"🎶 {title}",
+        title=f"🎶 Lyrics: {song}",
         description=pages[0],
         color=discord.Color.green()
     )
-    embed.set_author(name=f"By {artist_name}")
-    embed.set_footer(text=f"KSoft.Si • Page 1/{len(pages)}")
+    embed.set_author(name=f"By {artist}")
+    embed.set_footer(text=f"{source} • Page 1/{len(pages)}")
+    if cover_url:
+        embed.set_thumbnail(url=cover_url)
 
-    view = LyricsPaginator(pages, f"Lyrics: {title} by {artist_name}")
+    view = LyricsPaginator(pages, f"🎶 Lyrics: {song} by {artist}")
     await ctx.send(embed=embed, view=view)
-
 
 
 @bot.command()
