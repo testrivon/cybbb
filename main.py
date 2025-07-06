@@ -19,6 +19,8 @@ from discord.ui import View, Button, Select
 from discord import SelectOption
 from typing import List, Dict, Union
 from volume_helper import get_volume_path
+import lyricsgenius
+
 
 def is_admin_or_developer(ctx):
     return ctx.author.id == 514078286146699265 or ctx.author.guild_permissions.administrator
@@ -427,8 +429,21 @@ async def alllastfm(ctx):
         return
         
 
+
 @bot.command()
 async def lyr(ctx, *, query: str = None):
+    genius_token = os.getenv("GENIUS_API_TOKEN")
+    if not genius_token:
+        await ctx.send("❌ Genius API token not set in `.env`.")
+        return
+
+    genius = lyricsgenius.Genius(
+        genius_token,
+        skip_non_songs=True,
+        excluded_terms=["(Remix)", "(Live)"],
+        timeout=10,
+        retries=1
+    )
     data = load_user_data()
 
     if query:
@@ -441,7 +456,7 @@ async def lyr(ctx, *, query: str = None):
     else:
         user_id = str(ctx.author.id)
         if user_id not in data:
-            await ctx.send("❌ Use `!setlastfm` to link your Last.fm account.")
+            await ctx.send("❌ You haven't set your Last.fm username. Use `!setlastfm <username>`.")
             return
 
         username = data[user_id]
@@ -451,7 +466,7 @@ async def lyr(ctx, *, query: str = None):
         async with aiohttp.ClientSession() as session:
             async with session.get(url) as response:
                 if response.status != 200:
-                    await ctx.send("⚠️ Couldn't fetch your Last.fm track.")
+                    await ctx.send("❌ Couldn't fetch your recent track from Last.fm.")
                     return
                 api_data = await response.json()
 
@@ -466,46 +481,30 @@ async def lyr(ctx, *, query: str = None):
             await ctx.send("⚠️ Couldn't parse Last.fm data.")
             return
 
-    artist_clean = artist.replace(" ", "-")
-    song_clean = song.replace(" ", "-")
-    genius_url = f"https://genius.com/{artist_clean}-{song_clean}-lyrics"
+    try:
+        result = genius.search_song(song, artist)
+        if not result or not result.lyrics:
+            await ctx.send(f"❌ No lyrics found for `{artist} - {song}`.")
+            return
 
-    async with aiohttp.ClientSession() as session:
-        async with session.get(genius_url) as response:
-            if response.status != 200:
-                await ctx.send(f"❌ Couldn't fetch lyrics from Genius for `{artist} - {song}`.")
-                return
-            html = await response.text()
+        lyrics = result.lyrics.strip()
+        pages = [lyrics[i:i+2000] for i in range(0, len(lyrics), 2000)]
 
-    import re
-    # Extract <div data-lyrics-container="true"> ... </div> sections
-    raw_lyrics = re.findall(r'<div data-lyrics-container="true">(.*?)</div>', html, re.DOTALL)
-    if not raw_lyrics:
-        await ctx.send(f"❌ Couldn't parse lyrics from Genius for `{song}` by `{artist}`.")
-        return
+        embed = discord.Embed(
+            title=f"🎶 Lyrics: {song}",
+            description=pages[0],
+            color=discord.Color.green()
+        )
+        embed.set_author(name=f"By {artist}")
+        embed.set_footer(text=f"{source} • Page 1/{len(pages)}")
+        if cover_url:
+            embed.set_thumbnail(url=cover_url)
 
-    # Remove HTML tags
-    lyrics = "\n".join(re.sub(r'<.*?>', '', block).strip() for block in raw_lyrics)
-    lyrics = re.sub(r'\n{3,}', '\n\n', lyrics).strip()
+        view = LyricsPaginator(pages, f"Lyrics: {song} by {artist}")
+        await ctx.send(embed=embed, view=view)
 
-    if not lyrics or len(lyrics) < 10:
-        await ctx.send(f"❌ No usable lyrics found for `{song}` by `{artist}`.")
-        return
-
-    pages = [lyrics[i:i+2000] for i in range(0, len(lyrics), 2000)]
-
-    embed = discord.Embed(
-        title=f"🎶 Lyrics: {song}",
-        description=pages[0],
-        color=discord.Color.green()
-    )
-    embed.set_author(name=f"By {artist}")
-    embed.set_footer(text=f"{source} • Page 1/{len(pages)}")
-    if cover_url:
-        embed.set_thumbnail(url=cover_url)
-
-    view = LyricsPaginator(pages, f"🎶 Lyrics: {song} by {artist}")
-    await ctx.send(embed=embed, view=view)
+    except Exception as e:
+        await ctx.send(f"⚠️ Error while fetching lyrics: {str(e)}")
 
 
 @bot.command()
