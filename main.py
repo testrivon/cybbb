@@ -1879,4 +1879,12 @@ async def serverinfo(interaction: discord.Interaction):
 
     await interaction.response.send_message(embed=embed)
 
-bot.run(token, log_handler=handler, log_level=logging.DEBUG)
+logging.basicConfig(
+    level=logging.DEBUG,
+    filename=log_path,
+    filemode='w',
+    format='[%(asctime)s] %(levelname)s:%(name)s: %(message)s',
+    encoding='utf-8'
+)
+bot.run(token)
+
