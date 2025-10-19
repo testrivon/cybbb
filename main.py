@@ -1681,28 +1681,25 @@ async def show_last_letter_status(ctx):
 
 @bot.event
 async def on_message(message):
-    # Always ignore bot messages or DMs
+    # 🚫 Ignore messages from bots or DMs
     if message.author.bot or not message.guild:
         await bot.process_commands(message)
         return
 
     try:
-        # Load game state
+        # Load active game data
         data = load_json(LAST_LETTER_GAME_FILE)
         guild_id = str(message.guild.id)
         game = data.get(guild_id)
 
-        # If no active game, just pass message to command handler
+        # Only run game logic if game is active AND in correct channel
         if not game or game.get("status") != "active":
-            await bot.process_commands(message)
-            return
+            return await bot.process_commands(message)
 
-        # Ignore messages in other channels
         if message.channel.id != game.get("channel_id"):
-            await bot.process_commands(message)
-            return
+            return await bot.process_commands(message)
 
-        # --- Game logic ---
+        # Extract and validate the word
         word = message.content.strip().lower()
         if not word.isalpha():
             await message.delete()
@@ -1714,34 +1711,34 @@ async def on_message(message):
         selected_length = game.get("length", "all")
         used_words_set = {entry["word"] for entry in words_used}
 
-        # Prevent same user twice in a row
+        # Prevent the same user from playing twice in a row
         if words_used and words_used[-1]["user_id"] == message.author.id:
             await message.delete()
             return
 
-        # Enforce word length if set
+        # Enforce chosen word length if not "all"
         if selected_length != "all" and len(word) != int(selected_length):
             await message.delete()
             return
 
-        # Must start with last letter
+        # Must start with the last letter of the previous word
         if last_word and word[0] != last_word[-1]:
             await message.delete()
             return
 
-        # Duplicate check
+        # No duplicate words
         if word in used_words_set:
             await message.delete()
             return
 
-        # Dictionary validation
+        # ✅ Dictionary validation
         async with aiohttp.ClientSession() as session:
             async with session.get(f"https://api.dictionaryapi.dev/api/v2/entries/en/{word}") as response:
                 if response.status != 200:
                     await message.delete()
                     return
 
-        # ✅ Valid word — record progress
+        # ✅ Valid word — record and react
         await message.add_reaction("✅")
 
         word_entry = {
@@ -1759,6 +1756,7 @@ async def on_message(message):
         participants[user_id]["word_count"] += 1
         participants[user_id]["letter_score"] += len(word)
 
+        # Save game state
         game["words_used"] = words_used
         game["participants"] = participants
         game["last_word"] = word
@@ -1766,12 +1764,11 @@ async def on_message(message):
         save_json(LAST_LETTER_GAME_FILE, data)
 
     except Exception as e:
-        # Log errors but never block command handling
+        # Log the error but don't break commands
         print(f"[on_message error] {e}")
 
-    finally:
-        # ✅ Always let commands process afterward
-        await bot.process_commands(message)
+    # ✅ Always process commands once, at the end
+    await bot.process_commands(message)
 
 
 @bot.command(name="def")
@@ -1963,5 +1960,6 @@ async def serverinfo(interaction: discord.Interaction):
     await interaction.response.send_message(embed=embed)
 
 bot.run(token, log_handler=handler, log_level=logging.DEBUG)
+
 
 
