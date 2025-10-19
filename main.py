@@ -1466,6 +1466,35 @@ async def getjsonzip(ctx, filename: str):
     except Exception as e:
         await ctx.send(f"⚠️ Error zipping file: {e}")
 
+@bot.command(name="clearjson")
+async def clear_json(ctx, filename: str):
+    """
+    ⚠️ Clears (empties) the contents of a JSON file on the volume.
+    Only available to the bot owner or server admins.
+    Example: !clearjson word_stats.json
+    """
+    if not is_admin_or_developer(ctx):
+        await ctx.send("❌ You are not authorized to use this command.")
+        return
+
+    path = get_volume_path(filename)
+    if not os.path.exists(path):
+        await ctx.send("❌ File not found.")
+        return
+
+    # Backup before wiping
+    backup_path = f"{path}.bak_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+    shutil.copy(path, backup_path)
+
+    try:
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump({}, f, indent=2)
+
+        await ctx.send(f"✅ Cleared `{filename}`. Backup saved as `{os.path.basename(backup_path)}`.")
+
+    except Exception as e:
+        await ctx.send(f"⚠️ Failed to clear `{filename}`: {e}")
+
 @bot.command()
 async def downloadstats(ctx):
     """
@@ -1934,4 +1963,5 @@ async def serverinfo(interaction: discord.Interaction):
     await interaction.response.send_message(embed=embed)
 
 bot.run(token, log_handler=handler, log_level=logging.DEBUG)
+
 
