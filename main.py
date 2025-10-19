@@ -1652,90 +1652,98 @@ async def show_last_letter_status(ctx):
 
 @bot.event
 async def on_message(message):
-    await bot.process_commands(message)
-
+    # Always ignore bot messages or DMs
     if message.author.bot or not message.guild:
+        await bot.process_commands(message)
         return
 
-    data = load_json(LAST_LETTER_GAME_FILE)
-    guild_id = str(message.guild.id)
-    game = data.get(guild_id)
+    try:
+        # Load game state
+        data = load_json(LAST_LETTER_GAME_FILE)
+        guild_id = str(message.guild.id)
+        game = data.get(guild_id)
 
-    if not game or game.get("status") != "active":
-        return
+        # If no active game, just pass message to command handler
+        if not game or game.get("status") != "active":
+            await bot.process_commands(message)
+            return
 
-    if message.channel.id != game.get("channel_id"):
-        return
+        # Ignore messages in other channels
+        if message.channel.id != game.get("channel_id"):
+            await bot.process_commands(message)
+            return
 
-    word = message.content.strip().lower()
-    if not word.isalpha():
-        await message.delete()
-        return
+        # --- Game logic ---
+        word = message.content.strip().lower()
+        if not word.isalpha():
+            await message.delete()
+            return
 
-    # Game state
-    words_used = game.get("words_used", [])
-    participants = game.get("participants", {})
-    last_word = game.get("last_word")
-    selected_length = game.get("length", "all")
-    used_words_set = {entry["word"] for entry in words_used}
+        words_used = game.get("words_used", [])
+        participants = game.get("participants", {})
+        last_word = game.get("last_word")
+        selected_length = game.get("length", "all")
+        used_words_set = {entry["word"] for entry in words_used}
 
-    # One user cannot play twice in a row
-    if words_used and words_used[-1]["user_id"] == message.author.id:
-        await message.delete()
-        return
+        # Prevent same user twice in a row
+        if words_used and words_used[-1]["user_id"] == message.author.id:
+            await message.delete()
+            return
 
-    # Length mismatch
-    if selected_length != "all" and len(word) != int(selected_length):
-        await message.delete()
-        return
+        # Enforce word length if set
+        if selected_length != "all" and len(word) != int(selected_length):
+            await message.delete()
+            return
 
-    # Must start with last letter of previous word
-    if last_word and word[0] != last_word[-1]:
-        await message.delete()
-        return
+        # Must start with last letter
+        if last_word and word[0] != last_word[-1]:
+            await message.delete()
+            return
 
-    # Duplicate word
-    if word in used_words_set:
-        await message.delete()
-        return
+        # Duplicate check
+        if word in used_words_set:
+            await message.delete()
+            return
 
-    # Dictionary check
-    async def is_valid_word(word):
-        url = f"https://api.dictionaryapi.dev/api/v2/entries/en/{word}"
+        # Dictionary validation
         async with aiohttp.ClientSession() as session:
-            async with session.get(url) as response:
-                return response.status == 200
+            async with session.get(f"https://api.dictionaryapi.dev/api/v2/entries/en/{word}") as response:
+                if response.status != 200:
+                    await message.delete()
+                    return
 
-    if not await is_valid_word(word):
-        await message.delete()
-        return
+        # ✅ Valid word — record progress
+        await message.add_reaction("✅")
 
-    # ✅ Word is valid — record and react
-    await message.add_reaction("✅")
-
-    word_entry = {
-        "user_id": message.author.id,
-        "username": message.author.display_name,
-        "word": word,
-        "timestamp": datetime.now(timezone.utc).isoformat()
-    }
-    words_used.append(word_entry)
-
-    user_id = str(message.author.id)
-    if user_id not in participants:
-        participants[user_id] = {
-            "word_count": 0,
-            "letter_score": 0
+        word_entry = {
+            "user_id": message.author.id,
+            "username": message.author.display_name,
+            "word": word,
+            "timestamp": datetime.now(timezone.utc).isoformat()
         }
+        words_used.append(word_entry)
 
-    participants[user_id]["word_count"] += 1
-    participants[user_id]["letter_score"] += len(word)
+        user_id = str(message.author.id)
+        if user_id not in participants:
+            participants[user_id] = {"word_count": 0, "letter_score": 0}
 
-    game["words_used"] = words_used
-    game["participants"] = participants
-    game["last_word"] = word
-    data[guild_id] = game
-    save_json(LAST_LETTER_GAME_FILE, data)
+        participants[user_id]["word_count"] += 1
+        participants[user_id]["letter_score"] += len(word)
+
+        game["words_used"] = words_used
+        game["participants"] = participants
+        game["last_word"] = word
+        data[guild_id] = game
+        save_json(LAST_LETTER_GAME_FILE, data)
+
+    except Exception as e:
+        # Log errors but never block command handling
+        print(f"[on_message error] {e}")
+
+    finally:
+        # ✅ Always let commands process afterward
+        await bot.process_commands(message)
+
 
 @bot.command(name="def")
 async def define_word(ctx, *, word: str):
@@ -1926,3 +1934,4 @@ async def serverinfo(interaction: discord.Interaction):
     await interaction.response.send_message(embed=embed)
 
 bot.run(token, log_handler=handler, log_level=logging.DEBUG)
+
